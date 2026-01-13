@@ -612,6 +612,28 @@ textarea {
   inset: 0;
 }
 
+.night-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(18, 24, 32, 0.65);
+  backdrop-filter: blur(2px);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  text-transform: none;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.night-overlay span {
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
 .seat {
   --seat-color: rgba(255, 255, 255, 0.6);
   position: absolute;
@@ -646,6 +668,20 @@ textarea {
 
 .seat__name {
   font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.seat__you {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: rgba(226, 167, 75, 0.2);
+  color: #8a5d15;
 }
 
 .seat__status {
@@ -678,6 +714,11 @@ textarea {
   border: 1px solid rgba(68, 177, 163, 0.35);
   color: var(--accent-deep);
   white-space: nowrap;
+}
+
+.seat__tag--top {
+  top: -18px;
+  bottom: auto;
 }
 
 .seat__tag--ghost {
@@ -824,6 +865,49 @@ textarea {
   font-size: 13px;
 }
 
+.role-card {
+  margin: 12px 16px 0;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(68, 177, 163, 0.12);
+  border: 1px solid rgba(68, 177, 163, 0.28);
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.role-card__header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.role-card__label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.role-card__team {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: rgba(226, 167, 75, 0.2);
+  color: #8a5d15;
+}
+
+.role-card__hint {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.role-card--private {
+  margin: 0;
+}
+
 .chat-body {
   min-height: 0;
   overflow: auto;
@@ -833,13 +917,23 @@ textarea {
 }
 
 .chat-message {
-  padding: 10px 12px;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-self: start;
+  width: fit-content;
+  max-width: 92%;
+  align-items: flex-start;
+  padding: 8px 10px;
   border-radius: 14px;
   background: rgba(31, 42, 50, 0.04);
   border: 1px solid rgba(31, 42, 50, 0.08);
 }
 
 .chat-message--system {
+  justify-self: center;
+  max-width: 86%;
+  align-items: center;
   background: rgba(68, 177, 163, 0.18);
   border-color: rgba(68, 177, 163, 0.35);
   color: #255e56;
@@ -864,6 +958,20 @@ textarea {
 .chat-name {
   color: var(--text-primary);
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-you {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: rgba(226, 167, 75, 0.2);
+  color: #8a5d15;
 }
 
 .chat-position {
@@ -871,9 +979,9 @@ textarea {
 }
 
 .chat-text {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.5;
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }
@@ -901,18 +1009,41 @@ textarea {
   position: absolute;
   right: 16px;
   top: 120px;
-  width: 240px;
+  width: 280px;
+  max-height: 70%;
+  display: grid;
+  grid-template-rows: auto 1fr;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(31, 42, 50, 0.12);
   box-shadow: var(--shadow);
-  transform: translateX(72%);
-  transition: transform 0.3s ease;
+  transform: translateX(0);
+  transition: width 0.3s ease, box-shadow 0.3s ease;
   overflow: hidden;
 }
 
 .private-panel--open {
-  transform: translateX(0);
+  width: 280px;
+}
+
+.private-panel:not(.private-panel--open) {
+  background: var(--bg-panel);
+  border-color: rgba(31, 42, 50, 0.1);
+  box-shadow: 0 8px 16px rgba(31, 42, 50, 0.08);
+  width: 54px;
+  max-height: none;
+  grid-template-rows: auto;
+}
+
+.private-panel:not(.private-panel--open) .private-content {
+  display: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.private-panel:not(.private-panel--open) .private-toggle {
+  border-radius: 999px;
+  padding: 8px 6px;
 }
 
 .private-toggle {
@@ -920,22 +1051,85 @@ textarea {
   border: none;
   background: rgba(31, 42, 50, 0.05);
   color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 10px 12px;
   cursor: pointer;
   font-size: 12px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 0.08em;
+}
+
+.private-panel--open .private-toggle {
+  writing-mode: horizontal-tb;
+  letter-spacing: normal;
 }
 
 .private-content {
   padding: 12px;
   display: grid;
-  gap: 10px;
+  gap: 12px;
   font-size: 12px;
   color: var(--text-dim);
+  min-height: 0;
+  overflow: auto;
 }
 
 .private-content h3 {
   margin: 0;
   font-size: 13px;
+  color: var(--text-primary);
+}
+
+.private-section {
+  display: grid;
+  gap: 8px;
+}
+
+.private-log {
+  display: grid;
+  gap: 8px;
+  max-height: 180px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.private-log p {
+  margin: 0;
+}
+
+.private-input {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.private-input textarea {
+  min-height: 80px;
+}
+
+.private-message {
+  border-radius: 12px;
+  background: rgba(31, 42, 50, 0.04);
+  border: 1px solid rgba(31, 42, 50, 0.08);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.private-tag {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.private-text {
+  margin: 0;
+  white-space: pre-wrap;
   color: var(--text-primary);
 }
 
@@ -988,6 +1182,63 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  justify-content: center;
+}
+
+.vote-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(245, 242, 237, 0.65);
+  backdrop-filter: blur(3px);
+  z-index: 4;
+}
+
+.vote-card {
+  width: min(360px, 90%);
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.98);
+  padding: 18px 18px 16px;
+  display: grid;
+  gap: 10px;
+  text-align: center;
+}
+
+.vote-card h3 {
+  margin: 0;
+  font-size: 18px;
+  font-family: var(--font-serif);
+}
+
+.vote-badge {
+  display: inline-flex;
+  justify-content: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(242, 195, 120, 0.28);
+  color: #8a5a16;
+}
+
+.vote-list {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.vote-item {
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(31, 42, 50, 0.04);
+}
+
+.vote-actions {
+  display: flex;
   justify-content: center;
 }
 

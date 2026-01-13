@@ -104,7 +104,7 @@ const seatPositions: Record<SeatId, CSSProperties> = {
 const roster: Player[] = [
   {
     id: "p0",
-    name: "你",
+    name: "旅人",
     seat: "bottom-mid-left",
     status: "存活",
     isHuman: true,
@@ -190,6 +190,7 @@ const roster: Player[] = [
 ];
 
 const seatOrder = roster.map((player) => player.id);
+const thinkingTagTopIds = new Set([humanId, "p1"]);
 
 const seatColors = roster.reduce(
   (acc, player) => {
@@ -198,6 +199,33 @@ const seatColors = roster.reduce(
   },
   {} as Record<SeatId, string>,
 );
+
+const roleLabels: Record<Role, string> = {
+  werewolf: "狼人",
+  seer: "预言家",
+  witch: "女巫",
+  hunter: "猎人",
+  idiot: "白痴",
+  villager: "平民",
+};
+
+const roleTeams: Record<Role, string> = {
+  werewolf: "狼人阵营",
+  seer: "好人阵营",
+  witch: "好人阵营",
+  hunter: "好人阵营",
+  idiot: "好人阵营",
+  villager: "好人阵营",
+};
+
+const roleHints: Record<Role, string> = {
+  werewolf: "夜晚与狼队协作击杀，白天伪装好人。",
+  seer: "每晚可查验 1 名玩家阵营。",
+  witch: "拥有一次解药与一次毒药。",
+  hunter: "死亡时可选择开枪带走一人。",
+  idiot: "被放逐可翻牌免死但失去投票权。",
+  villager: "无夜间技能，靠发言与投票推理。",
+};
 
 const defaultBaseUrl = "https://api.openai.com/v1";
 
@@ -231,7 +259,7 @@ const defaultAiPlayers: AiPlayerConfig[] = [
     name: "雾行者",
     seat: "right-bottom",
     providerId: "provider-openai",
-    model: "gpt-3.5-turbo-instruct",
+    model: "gpt-4.1-mini",
   },
   {
     id: "p4",
@@ -252,7 +280,7 @@ const defaultAiPlayers: AiPlayerConfig[] = [
     name: "白棋",
     seat: "top-mid-right",
     providerId: "provider-openai",
-    model: "gpt-3.5-turbo-instruct",
+    model: "gpt-4.1-mini",
   },
   {
     id: "p7",
@@ -280,7 +308,7 @@ const defaultAiPlayers: AiPlayerConfig[] = [
     name: "墨影",
     seat: "left-bottom",
     providerId: "provider-openai",
-    model: "gpt-3.5-turbo-instruct",
+    model: "gpt-4.1-mini",
   },
   {
     id: "p11",
@@ -342,6 +370,29 @@ const cloneSession = (session: GameSession) =>
     ? structuredClone(session)
     : JSON.parse(JSON.stringify(session));
 
+const formatRoleReveal = (session: GameSession, playerId: string) => {
+  const player = session.players.find((item) => item.id === playerId);
+  const role = session.roleAssignments[playerId];
+  const roleLabel = role ? roleLabels[role] ?? role : "未知身份";
+  return `${player?.name ?? playerId}（${roleLabel}）`;
+};
+
+const listUnavailableAiPlayers = (config: AiConfigState) => {
+  const providerById = new Map(
+    config.providers.map((provider) => [provider.id, provider]),
+  );
+  const fallbackProvider = config.providers[0];
+  return config.aiPlayers
+    .filter((player) => {
+      const provider = providerById.get(player.providerId) ?? fallbackProvider;
+      if (!provider) {
+        return true;
+      }
+      return !provider.baseUrl.trim() || !provider.apiKey.trim();
+    })
+    .map((player) => player.name);
+};
+
 const parseWitchAction = (output: { content: string; notes: string } | null) => {
   if (!output) {
     return "none" as const;
@@ -364,7 +415,7 @@ function App() {
   const [view, setView] = useState<"menu" | "ai-config" | "game">("menu");
   const [aiConfig, setAiConfig] = useState<AiConfigState>(defaultAiConfig);
   const [session, setSession] = useState<GameSession | null>(null);
-  const [saveState, setSaveState] = useState<"idle" | "saved">("idle");
+  const [saveState, setSaveState] = useState<"idle" | "saved" | "error">("idle");
   const [paused, setPaused] = useState(false);
   const [draft, setDraft] = useState("");
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
@@ -378,11 +429,14 @@ function App() {
   const [privateOpen, setPrivateOpen] = useState(false);
   const [wolfChatDraft, setWolfChatDraft] = useState("");
   const [gameResult, setGameResult] = useState<string | null>(null);
+  const [voteSummary, setVoteSummary] = useState<string[]>([]);
+  const [voteSummaryOpen, setVoteSummaryOpen] = useState(false);
 
   const sessionRef = useRef<GameSession | null>(null);
   const pausedRef = useRef(false);
   const pendingResolverRef = useRef<((value: unknown) => void) | null>(null);
   const engineRef = useRef<EngineToken | null>(null);
+  const agentErrorRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     pausedRef.current = paused;
@@ -439,11 +493,27 @@ function App() {
   const phaseInfo = phaseMeta[phaseId];
   const phaseProgress =
     (phaseOrder.indexOf(phaseId) + 1) / Math.max(phaseOrder.length, 1);
+  const showThinkingIndicators = phaseId !== "night";
 
   const currentSpeaker = currentSpeakerId;
   const thinkingSpeaker = thinkingId;
 
   const publicLog = session?.publicLog ?? [];
+  const humanRole = session?.roleAssignments[humanId];
+  const humanRoleLabel = humanRole ? roleLabels[humanRole] : "未知";
+  const humanRoleTeam = humanRole ? roleTeams[humanRole] : "";
+  const humanRoleHint = humanRole ? roleHints[humanRole] : "";
+  const humanPrivateMessages = session?.agents[humanId]?.privateMessages ?? [];
+  const wolfChatMessages = session?.wolfChat ?? [];
+  const wolfTeamNames = useMemo(() => {
+    if (!session || humanRole !== "werewolf") {
+      return [];
+    }
+    return session.players
+      .filter((player) => session.roleAssignments[player.id] === "werewolf")
+      .filter((player) => player.id !== humanId)
+      .map((player) => player.name);
+  }, [session, humanRole]);
 
   const canSpeak =
     pendingAction?.type === "speech" && !paused && view === "game";
@@ -509,7 +579,8 @@ function App() {
       setSaveState("saved");
       window.setTimeout(() => setSaveState("idle"), 1400);
     } catch {
-      setSaveState("idle");
+      setSaveState("error");
+      window.setTimeout(() => setSaveState("idle"), 1800);
     }
   };
 
@@ -522,6 +593,7 @@ function App() {
 
   const handleReturnMenu = () => {
     stopEngine();
+    pendingResolverRef.current = null;
     setPaused(false);
     setSession(null);
     sessionRef.current = null;
@@ -529,6 +601,8 @@ function App() {
     setCurrentSpeakerId(null);
     setThinkingId(null);
     setGameResult(null);
+    setVoteSummary([]);
+    setVoteSummaryOpen(false);
     setDraft("");
     setSelectedVoteTarget(null);
     setNightTargetId(null);
@@ -589,6 +663,40 @@ function App() {
         content,
       });
     });
+  };
+
+  const addVoteBreakdown = (votes: Record<string, string | null>) => {
+    const current = sessionRef.current;
+    if (!current) {
+      return;
+    }
+    const details = seatOrder
+      .filter((voterId) => voterId in votes)
+      .map((voterId) => {
+        const voterName =
+          current.players.find((player) => player.id === voterId)?.name ??
+          voterId;
+        const voterStatus =
+          current.players.find((player) => player.id === voterId)?.status ??
+          "死亡";
+        if (voterStatus !== "存活") {
+          return null;
+        }
+        const targetId = votes[voterId];
+        if (!targetId) {
+          return `${voterName}→弃票`;
+        }
+        const targetName =
+          current.players.find((player) => player.id === targetId)?.name ??
+          targetId;
+        return `${voterName}→${targetName}`;
+      })
+      .filter(Boolean) as string[];
+    if (details.length > 0) {
+      addPrivateMessage(humanId, `投票明细（仅你可见）：${details.join("；")}`);
+      setVoteSummary(details);
+      setVoteSummaryOpen(true);
+    }
   };
 
   const addWolfChat = (fromId: string, content: string) => {
@@ -667,6 +775,14 @@ function App() {
     resolvePendingAction({ targetId: selectedVoteTarget } satisfies VoteResult);
   };
 
+  const handleAbstainVote = () => {
+    if (pendingAction?.type !== "vote" || !canVote) {
+      return;
+    }
+    resolvePendingAction({ targetId: null } satisfies VoteResult);
+    setSelectedVoteTarget(null);
+  };
+
   const handleConfirmNightAction = () => {
     if (pendingAction?.type !== "night") {
       return;
@@ -724,6 +840,8 @@ function App() {
 
   const handleStartGame = () => {
     stopEngine();
+    pendingResolverRef.current = null;
+    agentErrorRef.current = {};
     const players: PlayerPublicState[] = roster.map((player) => ({
       id: player.id,
       name: player.name,
@@ -745,6 +863,8 @@ function App() {
     setCurrentSpeakerId(null);
     setThinkingId(null);
     setGameResult(null);
+    setVoteSummary([]);
+    setVoteSummaryOpen(false);
     setDraft("");
     setSelectedVoteTarget(null);
     setNightTargetId(null);
@@ -752,12 +872,45 @@ function App() {
     setPrivateOpen(false);
     setWolfChatDraft("");
 
+    const offlineAi = listUnavailableAiPlayers(aiConfig);
+    if (offlineAi.length > 0) {
+      addSystemMessage(
+        `提示：以下 AI 未配置 API Key 或 Host，将自动沉默：${offlineAi.join(
+          "、",
+        )}。`,
+      );
+    }
+    addSystemMessage("身份已分配，夜晚降临。请查看右侧身份卡与私密信息。");
+
     const engine = { aborted: false };
     engineRef.current = engine;
     runGameLoop(engine).catch(() => {
       engine.aborted = true;
     });
   };
+
+  const reportAgentFailure = (agentId: string, raw: string) => {
+    const current = sessionRef.current;
+    if (!current) {
+      return;
+    }
+    const name =
+      current.players.find((player) => player.id === agentId)?.name ?? agentId;
+    const trimmed = raw.trim();
+    const summary = trimmed
+      ? trimmed.slice(0, 180)
+      : "响应为空或不符合 JSON 结构。";
+    const signature = `${agentId}:${summary}`;
+    if (agentErrorRef.current[agentId] === signature) {
+      return;
+    }
+    agentErrorRef.current[agentId] = signature;
+    addPrivateMessage(
+      humanId,
+      `AI ${name} 响应无效/失败：${summary}`,
+    );
+  };
+
   const callAgent = async (agentId: string) => {
     const current = sessionRef.current;
     if (!current) {
@@ -765,6 +918,7 @@ function App() {
     }
     const profile = current.aiProfiles[agentId];
     if (!profile || !profile.baseUrl || !profile.apiKey) {
+      reportAgentFailure(agentId, "缺少 API Host 或 API Key。");
       return null;
     }
     const messages = buildAgentTurnMessages(current, agentId);
@@ -776,6 +930,9 @@ function App() {
           content: raw || "[empty-response]",
         });
       });
+      if (!output) {
+        reportAgentFailure(agentId, raw || "响应未通过解析。");
+      }
       return output;
     } catch {
       mutateSession((draft) => {
@@ -784,6 +941,7 @@ function App() {
           content: "[request-error]",
         });
       });
+      reportAgentFailure(agentId, "请求异常。");
       return null;
     }
   };
@@ -875,6 +1033,9 @@ function App() {
           role: "werewolf",
           options: alivePlayers,
         });
+        if (engine.aborted) {
+          return;
+        }
         if (result.chat) {
           addWolfChat(wolf.id, result.chat);
         }
@@ -892,6 +1053,9 @@ function App() {
       setThinkingId(wolf.id);
       const output = await callAgent(wolf.id);
       setThinkingId(null);
+      if (engine.aborted) {
+        return;
+      }
       if (output?.type === "wolf_chat" && output.content.trim()) {
         addWolfChat(wolf.id, output.content.trim());
       }
@@ -927,6 +1091,9 @@ function App() {
               role: "seer",
               options: alivePlayers,
             });
+            if (engine.aborted) {
+              return;
+            }
             if (result.targetId) {
               const targetRole = current.roleAssignments[result.targetId];
               const resultText =
@@ -947,6 +1114,9 @@ function App() {
             setThinkingId(seerId);
             const output = await callAgent(seerId);
             setThinkingId(null);
+            if (engine.aborted) {
+              return;
+            }
             const resolved = resolveTargetId(alivePlayers, output?.target ?? null);
             if (resolved) {
               const targetRole = current.roleAssignments[resolved];
@@ -987,6 +1157,9 @@ function App() {
               canSave,
               canPoison,
             });
+            if (engine.aborted) {
+              return;
+            }
             if (result.action === "save" && canSave && wolfTargetId) {
               saved = true;
               mutateSession((draft) => {
@@ -1013,6 +1186,9 @@ function App() {
             setThinkingId(witchId);
             const output = await callAgent(witchId);
             setThinkingId(null);
+            if (engine.aborted) {
+              return;
+            }
             const action = parseWitchAction(output);
             if (action === "save" && canSave && wolfTargetId) {
               saved = true;
@@ -1051,12 +1227,15 @@ function App() {
       addSystemMessage("昨夜无人死亡（平安夜）。");
     } else {
       const names = nightDeaths
-        .map((id) => current.players.find((player) => player.id === id)?.name ?? id)
+        .map((id) => formatRoleReveal(current, id))
         .join("、");
       addSystemMessage(`昨夜死亡：${names}。`);
     }
 
     await resolveHunterShot(engine, nightDeaths);
+    if (engine.aborted) {
+      return;
+    }
   };
 
   const runDayPhase = async (engine: EngineToken) => {
@@ -1085,6 +1264,9 @@ function App() {
           type: "speech",
           maxLength: 240,
         });
+        if (engine.aborted) {
+          return;
+        }
         addSpeechMessage(playerId, result.text.trim());
         setCurrentSpeakerId(null);
         continue;
@@ -1096,6 +1278,9 @@ function App() {
       setThinkingId(playerId);
       const output = await callAgent(playerId);
       setThinkingId(null);
+      if (engine.aborted) {
+        return;
+      }
       setCurrentSpeakerId(playerId);
       const speechText =
         output?.type === "speech" && output.content.trim()
@@ -1103,8 +1288,14 @@ function App() {
           : "（沉默）";
       addSpeechMessage(playerId, speechText);
       await delay(250);
+      if (engine.aborted) {
+        return;
+      }
       setCurrentSpeakerId(null);
       await delay(200);
+      if (engine.aborted) {
+        return;
+      }
     }
 
     updatePhase("voting");
@@ -1116,6 +1307,10 @@ function App() {
     const voters = getEligibleVoters(current.players);
     const votes: Record<string, string | null> = {};
     for (const voterId of seatOrder) {
+      const voterState = current.players.find((player) => player.id === voterId);
+      if (!voterState || voterState.status !== "存活") {
+        continue;
+      }
       if (!voters.find((player) => player.id === voterId)) {
         continue;
       }
@@ -1128,22 +1323,30 @@ function App() {
           type: "vote",
           options: getAlivePlayers(current.players),
         });
+        if (engine.aborted) {
+          return;
+        }
         votes[voterId] = result.targetId;
         continue;
       }
       addPrivateMessage(
         voterId,
-        "投票阶段：请输出 type=vote，target 填放逐目标编号/姓名或 null。",
+        "投票阶段：请独立决策后输出 type=vote，target 填放逐目标编号/姓名或 null。",
       );
       setThinkingId(voterId);
       const output = await callAgent(voterId);
       setThinkingId(null);
+      if (engine.aborted) {
+        return;
+      }
       const resolved = resolveTargetId(
         getAlivePlayers(current.players),
         output?.target ?? null,
       );
       votes[voterId] = output?.type === "vote" ? resolved : null;
     }
+
+    addVoteBreakdown(votes);
 
     updatePhase("resolution");
     const outcome = resolveVoteOutcome(votes, seatOrder);
@@ -1172,12 +1375,11 @@ function App() {
     }
 
     markDead(targetId);
-    addSystemMessage(
-      `投票结果：${
-        current.players.find((player) => player.id === targetId)?.name ?? targetId
-      } 被放逐。`,
-    );
+    addSystemMessage(`投票结果：${formatRoleReveal(current, targetId)} 被放逐。`);
     await resolveHunterShot(engine, [targetId]);
+    if (engine.aborted) {
+      return;
+    }
   };
 
   const resolveHunterShot = async (engine: EngineToken, deaths: string[]) => {
@@ -1203,16 +1405,16 @@ function App() {
         type: "hunter",
         options: getAlivePlayers(current.players),
       });
+      if (engine.aborted) {
+        return;
+      }
       mutateSession((draft) => {
         draft.hunterShotUsed = true;
       });
       if (result.targetId) {
         markDead(result.targetId);
         addSystemMessage(
-          `猎人开枪带走了 ${
-            current.players.find((player) => player.id === result.targetId)
-              ?.name ?? result.targetId
-          }。`,
+          `猎人开枪带走了 ${formatRoleReveal(current, result.targetId)}。`,
         );
       } else {
         addSystemMessage("猎人选择不开枪。");
@@ -1227,6 +1429,9 @@ function App() {
     setThinkingId(hunterId);
     const output = await callAgent(hunterId);
     setThinkingId(null);
+    if (engine.aborted) {
+      return;
+    }
     mutateSession((draft) => {
       draft.hunterShotUsed = true;
     });
@@ -1237,9 +1442,7 @@ function App() {
     if (resolved) {
       markDead(resolved);
       addSystemMessage(
-        `猎人开枪带走了 ${
-          current.players.find((player) => player.id === resolved)?.name ?? resolved
-        }。`,
+        `猎人开枪带走了 ${formatRoleReveal(current, resolved)}。`,
       );
     } else {
       addSystemMessage("猎人选择不开枪。");
@@ -1313,12 +1516,6 @@ function App() {
                     >
                       AI 玩家配置
                     </button>
-                    <button
-                      className="button button--ghost"
-                      onClick={handleSaveAiConfig}
-                    >
-                      {saveState === "saved" ? "已保存" : "保存配置"}
-                    </button>
                   </div>
                 </div>
 
@@ -1355,10 +1552,10 @@ function App() {
             <div>
               <span className="config__badge">AI 玩家配置</span>
               <h1 className="config__title">配置 AI 玩家</h1>
-              <p className="config__subtitle">
-                先创建 API 提供商，再为每位 AI 选择提供商与模型。Responses
-                调用 /v1/responses，Completions 调用 /v1/completions。
-              </p>
+                <p className="config__subtitle">
+                  先创建 API 提供商，再为每位 AI 选择提供商与模型。Responses
+                  调用 /v1/responses，Chat Completions 调用 /v1/chat/completions。
+                </p>
             </div>
             <div className="config__actions">
               <button className="button button--ghost" onClick={() => setView("menu")}
@@ -1367,7 +1564,11 @@ function App() {
               </button>
               <button className="button button--ghost" onClick={handleSaveAiConfig}
               >
-                {saveState === "saved" ? "已保存" : "保存配置"}
+                {saveState === "saved"
+                  ? "已保存"
+                  : saveState === "error"
+                    ? "保存失败"
+                    : "保存配置"}
               </button>
               <button className="button button--primary" onClick={handleStartGame}
               >
@@ -1414,7 +1615,9 @@ function App() {
                             }
                           >
                             <option value="responses">OpenAI Responses API</option>
-                            <option value="completions">OpenAI Completions API</option>
+                            <option value="chat_completions">
+                              OpenAI Chat Completions API
+                            </option>
                           </select>
                         </label>
                         <label>
@@ -1548,19 +1751,21 @@ function App() {
                 </div>
               </div>
 
-              <div className="table-seats">
-                {displayPlayers.map((player) => (
-                  <div
-                    key={player.id}
-                    className={[
-                      "seat",
-                      player.isHuman ? "seat--human" : "",
-                      currentSpeaker === player.id ? "seat--speaking" : "",
-                      thinkingSpeaker === player.id ? "seat--thinking" : "",
-                      player.status === "死亡" ? "seat--dead" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
+                <div className="table-seats">
+                  {displayPlayers.map((player) => (
+                    <div
+                      key={player.id}
+                      className={[
+                        "seat",
+                        player.isHuman ? "seat--human" : "",
+                        currentSpeaker === player.id ? "seat--speaking" : "",
+                        showThinkingIndicators && thinkingSpeaker === player.id
+                          ? "seat--thinking"
+                          : "",
+                        player.status === "死亡" ? "seat--dead" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
                     style={
                       {
                         ...seatPositions[player.seat],
@@ -1570,7 +1775,10 @@ function App() {
                   >
                     <div className="seat__avatar">{player.name.slice(0, 1)}</div>
                     <div className="seat__body">
-                      <span className="seat__name">{player.name}</span>
+                      <span className="seat__name">
+                        {player.name}
+                        {player.isHuman && <span className="seat__you">你</span>}
+                      </span>
                       <span className="seat__status" data-status={player.status}
                       >
                         {player.status}
@@ -1579,13 +1787,30 @@ function App() {
                     {currentSpeaker === player.id && (
                       <span className="seat__tag">发言中</span>
                     )}
-                    {thinkingSpeaker === player.id && (
-                      <span className="seat__tag seat__tag--ghost">思考中</span>
-                    )}
+                      {showThinkingIndicators && thinkingSpeaker === player.id && (
+                        <span
+                          className={[
+                            "seat__tag",
+                            "seat__tag--ghost",
+                            thinkingTagTopIds.has(player.id)
+                              ? "seat__tag--top"
+                              : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                        >
+                          思考中
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {phaseId === "night" && (
+                  <div className="night-overlay">
+                    <span>天黑请闭眼</span>
                   </div>
-                ))}
+                )}
               </div>
-            </div>
 
             <div className="action-bar">
               <div className="action-card">
@@ -1615,7 +1840,7 @@ function App() {
                   <button
                     className="button button--ghost"
                     disabled={!canVote}
-                    onClick={() => setSelectedVoteTarget("__abstain__")}
+                    onClick={handleAbstainVote}
                   >
                     弃票
                   </button>
@@ -1835,7 +2060,12 @@ function App() {
                               )?.accent ?? "#94a3b8",
                           }}
                         />
-                        <span className="chat-name">{message.speakerName}</span>
+                        <span className="chat-name">
+                          {message.speakerName}
+                          {message.speakerId === humanId && (
+                            <span className="chat-you">你</span>
+                          )}
+                        </span>
                         <span className="chat-position">
                           {seatLabels[
                             displayPlayers.find(
@@ -1888,35 +2118,96 @@ function App() {
                 className="private-toggle"
                 onClick={() => setPrivateOpen((open) => !open)}
               >
-                {privateOpen ? "收起夜聊" : "展开夜聊"}
+                {privateOpen ? "收起私密" : "展开私密"}
               </button>
               <div className="private-content">
-                <h3>私密频道 · 狼人夜聊</h3>
-                {playerHasWolfChat ? (
-                  <>
-                    <p>这里不会替换主界面，只在侧边滑出。</p>
-                    <button
-                      className="button button--ghost"
-                      disabled={phaseId !== "night" || paused}
-                      onClick={() => {
-                        if (wolfChatDraft.trim()) {
-                          addWolfChat(humanId, wolfChatDraft.trim());
-                          setWolfChatDraft("");
-                        }
-                      }}
-                    >
-                      发送夜聊
-                    </button>
-                  </>
-                ) : (
-                  <p>仅狼人可见。</p>
+                {session && (
+                  <div className="role-card role-card--private">
+                    <div className="role-card__header">
+                      <span className="role-card__label">你的身份</span>
+                      <strong>{humanRoleLabel}</strong>
+                      {humanRoleTeam && (
+                        <span className="role-card__team">{humanRoleTeam}</span>
+                      )}
+                    </div>
+                    {humanRoleHint && (
+                      <p className="role-card__hint">{humanRoleHint}</p>
+                    )}
+                    {humanRole === "werewolf" && wolfTeamNames.length > 0 && (
+                      <p className="role-card__hint">
+                        狼队同伴：{wolfTeamNames.join("、")}
+                      </p>
+                    )}
+                  </div>
                 )}
+                <div className="private-section">
+                  <h3>私密信息</h3>
+                  <div className="private-log">
+                    {humanPrivateMessages.length > 0 ? (
+                      humanPrivateMessages.map((message) => (
+                        <div key={message.id} className="private-message">
+                          <span className="private-tag">
+                            {message.channel === "role_prompt"
+                              ? "身份提示"
+                              : "主持人"}
+                          </span>
+                          <p className="private-text">{message.content}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p>暂无私密信息。</p>
+                    )}
+                  </div>
+                </div>
+                <div className="private-section">
+                  <h3>狼人夜聊</h3>
+                  {playerHasWolfChat ? (
+                    <>
+                      <div className="private-log">
+                        {wolfChatMessages.length > 0 ? (
+                          wolfChatMessages.map((message) => (
+                            <div key={message.id} className="private-message">
+                              <span className="private-tag">{message.from}</span>
+                              <p className="private-text">{message.content}</p>
+                            </div>
+                          ))
+                        ) : (
+                          <p>暂无夜聊内容。</p>
+                        )}
+                      </div>
+                      <label className="private-input">
+                        夜聊输入
+                        <textarea
+                          value={wolfChatDraft}
+                          onChange={(event) => setWolfChatDraft(event.target.value)}
+                          maxLength={140}
+                          placeholder="写给狼队的私密信息"
+                          disabled={phaseId !== "night" || paused}
+                        />
+                      </label>
+                      <button
+                        className="button button--ghost"
+                        disabled={phaseId !== "night" || paused}
+                        onClick={() => {
+                          if (wolfChatDraft.trim()) {
+                            addWolfChat(humanId, wolfChatDraft.trim());
+                            setWolfChatDraft("");
+                          }
+                        }}
+                      >
+                        发送夜聊
+                      </button>
+                    </>
+                  ) : (
+                    <p>仅狼人可见。</p>
+                  )}
+                </div>
               </div>
             </div>
           </aside>
-          {paused && (
-            <div className="pause-overlay">
-              <div className="pause-card">
+            {paused && (
+              <div className="pause-overlay">
+                <div className="pause-card">
                 <span className="pause-badge">对局已暂停</span>
                 <h2>暂时停下</h2>
                 <p>阶段推进与计时已暂停，点击继续返回牌桌。</p>
@@ -1932,11 +2223,34 @@ function App() {
                     返回菜单
                   </button>
                 </div>
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+            {voteSummaryOpen && (
+              <div className="vote-overlay">
+                <div className="vote-card">
+                  <span className="vote-badge">投票票型</span>
+                  <h3>本轮投票明细</h3>
+                  <div className="vote-list">
+                    {voteSummary.map((item) => (
+                      <div key={item} className="vote-item">
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="vote-actions">
+                    <button
+                      className="button button--primary"
+                      onClick={() => setVoteSummaryOpen(false)}
+                    >
+                      知道了
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
     </div>
   );
 }

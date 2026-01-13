@@ -36,6 +36,15 @@ const ROLE_SEQUENCE: Role[] = [
   "villager",
 ];
 
+const ROLE_PUBLIC_LABELS: Record<Role, string> = {
+  werewolf: "狼人",
+  seer: "预言家",
+  witch: "女巫",
+  hunter: "猎人",
+  idiot: "白痴",
+  villager: "平民",
+};
+
 const createId = () =>
   `id_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`;
 
@@ -117,12 +126,12 @@ export const createGameSession = (params: {
     {},
   );
 
-  const agents = params.aiPlayers.reduce<Record<string, AgentThread>>(
-    (acc, ai) => {
-      const role = roleAssignments[ai.id] ?? "villager";
+  const agents = params.players.reduce<Record<string, AgentThread>>(
+    (acc, player) => {
+      const role = roleAssignments[player.id] ?? "villager";
       const privateMessages = [
         createRoleMessage({
-          playerId: ai.id,
+          playerId: player.id,
           role,
           day,
           phaseId,
@@ -130,9 +139,9 @@ export const createGameSession = (params: {
         }),
       ];
 
-      acc[ai.id] = {
-        id: ai.id,
-        name: ai.name,
+      acc[player.id] = {
+        id: player.id,
+        name: player.name,
         role,
         systemPrompt: buildPlayerSystemPrompt(),
         messages: [],
@@ -185,11 +194,21 @@ export const buildAgentTurnMessages = (
     agent.role === "werewolf"
       ? [...agent.privateMessages, ...session.wolfChat]
       : agent.privateMessages;
+  const revealedRoles: Record<string, string | null> = {};
+  session.players.forEach((player) => {
+    if (player.status === "死亡" || session.idiotRevealed[player.id]) {
+      const role = session.roleAssignments[player.id];
+      revealedRoles[player.id] = role ? ROLE_PUBLIC_LABELS[role] ?? role : null;
+    }
+  });
+  const selfPlayer = session.players.find((player) => player.id === agentId) ?? null;
   const publicPayload = buildPublicContextPayload({
     day: session.day,
     phaseId: session.phaseId,
     players: session.players,
     publicLog: session.publicLog,
+    revealedRoles,
+    self: selfPlayer,
   });
   const privatePayload = buildPrivateContextPayload(privateMessages);
 

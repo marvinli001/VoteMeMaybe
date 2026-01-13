@@ -14,7 +14,7 @@ const getStore = () => {
 };
 
 const isProtocol = (value: unknown): value is ApiProtocol =>
-  value === "responses" || value === "completions";
+  value === "responses" || value === "completions" || value === "chat_completions";
 
 export type AiConfigState = {
   providers: ApiProvider[];
@@ -41,10 +41,14 @@ const normalizeProviders = (
       isProtocol(candidate.protocol) &&
       typeof candidate.baseUrl === "string"
     ) {
+      const protocol =
+        candidate.protocol === "completions"
+          ? "chat_completions"
+          : candidate.protocol;
       normalized.push({
         id: candidate.id,
         name: candidate.name.trim() || "未命名提供商",
-        protocol: candidate.protocol,
+        protocol,
         baseUrl: candidate.baseUrl.trim(),
         apiKey: typeof candidate.apiKey === "string" ? candidate.apiKey.trim() : "",
       });

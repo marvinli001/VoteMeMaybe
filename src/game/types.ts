@@ -14,7 +14,7 @@ export type SeatId =
 
 export type PlayerStatus = "存活" | "死亡" | "禁投";
 
-export type ApiProtocol = "responses" | "completions";
+export type ApiProtocol = "responses" | "completions" | "chat_completions";
 
 export type ApiProvider = {
   id: string;

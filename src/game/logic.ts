@@ -19,7 +19,16 @@ export const resolveTargetId = (
     return byId.id;
   }
   const byName = players.find((player) => player.name === normalized);
-  return byName?.id ?? null;
+  if (byName) {
+    return byName.id;
+  }
+  const byPrefix = players.filter((player) =>
+    player.name.startsWith(normalized),
+  );
+  if (byPrefix.length === 1) {
+    return byPrefix[0].id;
+  }
+  return null;
 };
 
 export const pickMajorityTarget = (
