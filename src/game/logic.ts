@@ -1,4 +1,24 @@
-import type { PlayerPublicState } from "./types";
+import type { PlayerPublicState, SeatId } from "./types";
+
+const PUNCTUATION_REGEX = /[，,。.?!！？、:：;；"'“”‘’()（）[\]{}<>《》【】]/g;
+
+const normalizeComparable = (value: string) =>
+  value.replace(/\s+/g, "").replace(PUNCTUATION_REGEX, "").toLowerCase();
+
+const seatAliasMap: Record<string, SeatId> = {
+  "左上": "top-left",
+  "上左": "top-mid-left",
+  "上右": "top-mid-right",
+  "右上": "top-right",
+  "右侧上": "right-top",
+  "右侧下": "right-bottom",
+  "右下": "bottom-right",
+  "下右": "bottom-mid-right",
+  "下左": "bottom-mid-left",
+  "左下": "bottom-left",
+  "左侧下": "left-bottom",
+  "左侧上": "left-top",
+};
 
 export const getAlivePlayers = (players: PlayerPublicState[]) =>
   players.filter((player) => player.status !== "死亡");
@@ -9,24 +29,63 @@ export const getEligibleVoters = (players: PlayerPublicState[]) =>
 export const resolveTargetId = (
   players: PlayerPublicState[],
   target: string | null,
+  roster: PlayerPublicState[] = players,
 ): string | null => {
   if (!target) {
     return null;
   }
   const normalized = target.trim();
-  const byId = players.find((player) => player.id === normalized);
+  if (!normalized) {
+    return null;
+  }
+  const condensed = normalized.replace(/\s+/g, "");
+  const cleaned = normalizeComparable(condensed);
+  const condensedLower = condensed.toLowerCase();
+  const byId = players.find((player) => {
+    const id = player.id.toLowerCase();
+    return id === condensedLower || id === cleaned;
+  });
   if (byId) {
     return byId.id;
   }
-  const byName = players.find((player) => player.name === normalized);
+  const byName = players.find(
+    (player) => normalizeComparable(player.name) === cleaned,
+  );
   if (byName) {
     return byName.id;
   }
+  const seatAlias = seatAliasMap[cleaned];
+  if (seatAlias) {
+    const seatMatch = players.find((player) => player.seat === seatAlias);
+    if (seatMatch) {
+      return seatMatch.id;
+    }
+  }
+  const seatMatch = players.find((player) => {
+    const seat = player.seat.toLowerCase();
+    return (
+      seat === condensed.toLowerCase() ||
+      seat.replace(/[-_]/g, "") === cleaned
+    );
+  });
+  if (seatMatch) {
+    return seatMatch.id;
+  }
   const byPrefix = players.filter((player) =>
-    player.name.startsWith(normalized),
+    normalizeComparable(player.name).startsWith(cleaned),
   );
   if (byPrefix.length === 1) {
     return byPrefix[0].id;
+  }
+  const numberMatch = condensed.match(/\d+/);
+  if (numberMatch && !/[a-z]/i.test(condensed)) {
+    const seatNumber = Number(numberMatch[0]);
+    if (Number.isFinite(seatNumber) && seatNumber >= 1) {
+      const rosterTarget = roster[seatNumber - 1];
+      if (rosterTarget && players.some((player) => player.id === rosterTarget.id)) {
+        return rosterTarget.id;
+      }
+    }
   }
   return null;
 };

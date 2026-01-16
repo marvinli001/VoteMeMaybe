@@ -431,12 +431,14 @@ function App() {
   const [gameResult, setGameResult] = useState<string | null>(null);
   const [voteSummary, setVoteSummary] = useState<string[]>([]);
   const [voteSummaryOpen, setVoteSummaryOpen] = useState(false);
+  const [showScrollToLatest, setShowScrollToLatest] = useState(false);
 
   const sessionRef = useRef<GameSession | null>(null);
   const pausedRef = useRef(false);
   const pendingResolverRef = useRef<((value: unknown) => void) | null>(null);
   const engineRef = useRef<EngineToken | null>(null);
   const agentErrorRef = useRef<Record<string, string>>({});
+  const chatBodyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     pausedRef.current = paused;
@@ -514,6 +516,52 @@ function App() {
       .filter((player) => player.id !== humanId)
       .map((player) => player.name);
   }, [session, humanRole]);
+
+  const isChatNearBottom = (element: HTMLElement) =>
+    element.scrollHeight - element.scrollTop - element.clientHeight <= 48;
+
+  const scrollChatToBottom = (behavior: ScrollBehavior = "smooth") => {
+    const element = chatBodyRef.current;
+    if (!element) {
+      return;
+    }
+    element.scrollTo({ top: element.scrollHeight, behavior });
+  };
+
+  useEffect(() => {
+    if (view !== "game") {
+      setShowScrollToLatest(false);
+      return;
+    }
+    const element = chatBodyRef.current;
+    if (!element) {
+      return;
+    }
+    const handleScroll = () => {
+      setShowScrollToLatest(!isChatNearBottom(element));
+    };
+    handleScroll();
+    element.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      element.removeEventListener("scroll", handleScroll);
+    };
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== "game") {
+      return;
+    }
+    const element = chatBodyRef.current;
+    if (!element) {
+      return;
+    }
+    if (isChatNearBottom(element)) {
+      scrollChatToBottom("smooth");
+      setShowScrollToLatest(false);
+    } else {
+      setShowScrollToLatest(true);
+    }
+  }, [publicLog.length, view]);
 
   const canSpeak =
     pendingAction?.type === "speech" && !paused && view === "game";
@@ -924,10 +972,13 @@ function App() {
     const messages = buildAgentTurnMessages(current, agentId);
     try {
       const { output, raw } = await requestAgentOutput(profile, messages);
+      const assistantContent = output
+        ? JSON.stringify(output)
+        : "[invalid-response]";
       mutateSession((draft) => {
         pushAgentMessage(draft, agentId, {
           role: "assistant",
-          content: raw || "[empty-response]",
+          content: assistantContent,
         });
       });
       if (!output) {
@@ -1063,7 +1114,7 @@ function App() {
         (output?.type === "wolf_chat" || output?.type === "night_action") &&
         output?.target
       ) {
-        const resolved = resolveTargetId(alivePlayers, output.target);
+        const resolved = resolveTargetId(alivePlayers, output.target, current.players);
         if (resolved && validWolfTargets.includes(resolved)) {
           wolfVotes.push(resolved);
         } else {
@@ -1117,7 +1168,11 @@ function App() {
             if (engine.aborted) {
               return;
             }
-            const resolved = resolveTargetId(alivePlayers, output?.target ?? null);
+            const resolved = resolveTargetId(
+              alivePlayers,
+              output?.target ?? null,
+              current.players,
+            );
             if (resolved) {
               const targetRole = current.roleAssignments[resolved];
               const resultText = targetRole === "werewolf" ? "狼人" : "好人";
@@ -1196,7 +1251,11 @@ function App() {
                 draft.witchState.antidoteUsed = true;
               });
             } else if (action === "poison" && canPoison) {
-              const resolved = resolveTargetId(alivePlayers, output?.target ?? null);
+              const resolved = resolveTargetId(
+                alivePlayers,
+                output?.target ?? null,
+                current.players,
+              );
               if (resolved) {
                 poisonedId = resolved;
                 mutateSession((draft) => {
@@ -1342,6 +1401,7 @@ function App() {
       const resolved = resolveTargetId(
         getAlivePlayers(current.players),
         output?.target ?? null,
+        current.players,
       );
       votes[voterId] = output?.type === "vote" ? resolved : null;
     }
@@ -1438,6 +1498,7 @@ function App() {
     const resolved = resolveTargetId(
       getAlivePlayers(current.players),
       output?.target ?? null,
+      current.players,
     );
     if (resolved) {
       markDead(resolved);
@@ -2035,7 +2096,7 @@ function App() {
               </div>
             </header>
 
-            <div className="chat-body">
+            <div className="chat-body" ref={chatBodyRef}>
               {publicLog.map((message) => (
                 <div
                   key={message.id}
@@ -2079,6 +2140,22 @@ function App() {
                   )}
                 </div>
               ))}
+              {showScrollToLatest && (
+                <button
+                  type="button"
+                  className="chat-scroll"
+                  onClick={() => scrollChatToBottom("smooth")}
+                  aria-label="滚动到最新"
+                >
+                  <svg
+                    className="chat-scroll__icon"
+                    viewBox="0 0 20 20"
+                    aria-hidden="true"
+                  >
+                    <path d="M10 4a1 1 0 0 1 1 1v6.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4.01 4a1 1 0 0 1-1.4 0l-4.01-4a1 1 0 1 1 1.4-1.42l2.3 2.3V5a1 1 0 0 1 1-1z" />
+                  </svg>
+                </button>
+              )}
             </div>
 
             <div className="chat-input">

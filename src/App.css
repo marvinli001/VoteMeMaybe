@@ -914,6 +914,43 @@ textarea {
   padding: 16px 18px 10px;
   display: grid;
   gap: 12px;
+  align-content: start;
+  align-items: start;
+}
+
+.chat-scroll {
+  position: sticky;
+  bottom: 12px;
+  margin-left: auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(31, 42, 50, 0.12);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  z-index: 1;
+}
+
+.chat-scroll:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(31, 42, 50, 0.16);
+}
+
+.chat-scroll:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(226, 167, 75, 0.22);
+}
+
+.chat-scroll__icon {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
 }
 
 .chat-message {
@@ -1016,9 +1053,9 @@ textarea {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(31, 42, 50, 0.12);
-  box-shadow: var(--shadow);
+  box-shadow: 0 6px 14px rgba(31, 42, 50, 0.08);
   transform: translateX(0);
-  transition: width 0.3s ease, box-shadow 0.3s ease;
+  transition: width 0.3s ease, box-shadow 0.2s ease, background 0.3s ease, border-color 0.3s ease;
   overflow: hidden;
 }
 
@@ -1027,10 +1064,10 @@ textarea {
 }
 
 .private-panel:not(.private-panel--open) {
-  background: var(--bg-panel);
-  border-color: rgba(31, 42, 50, 0.1);
-  box-shadow: 0 8px 16px rgba(31, 42, 50, 0.08);
-  width: 54px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  width: 46px;
   max-height: none;
   grid-template-rows: auto;
 }
@@ -1043,13 +1080,15 @@ textarea {
 
 .private-panel:not(.private-panel--open) .private-toggle {
   border-radius: 999px;
-  padding: 8px 6px;
+  padding: 8px 4px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
 }
 
 .private-toggle {
   width: 100%;
-  border: none;
-  background: rgba(31, 42, 50, 0.05);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.9);
   color: var(--text-primary);
   display: flex;
   align-items: center;
@@ -1057,12 +1096,23 @@ textarea {
   padding: 10px 12px;
   cursor: pointer;
   font-size: 12px;
+  font-weight: 600;
   writing-mode: vertical-rl;
   text-orientation: mixed;
   letter-spacing: 0.08em;
+  transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.private-toggle:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 1);
+  border-color: rgba(31, 42, 50, 0.18);
 }
 
 .private-panel--open .private-toggle {
+  border-color: rgba(31, 42, 50, 0.16);
+  background: rgba(255, 255, 255, 0.98);
+  color: var(--text-primary);
   writing-mode: horizontal-tb;
   letter-spacing: normal;
 }

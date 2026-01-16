@@ -3,15 +3,20 @@ import type { Role } from "./types";
 export const OUTPUT_SCHEMA = `{
   "type": "speech" | "vote" | "night_action" | "wolf_chat",
   "content": "公开发言/投票目标/夜间技能/狼队私聊内容",
-  "target": "若有目标则填玩家编号/姓名，否则为 null",
+  "target": "若有目标则填玩家编号（如 1号/2号）或姓名，否则为 null",
   "confidence": 0-1,
   "notes": "给主持人/系统的简短理由（不公开给其他玩家）"
 }`;
 
 export const OUTPUT_CONSTRAINT = [
   "输出必须严格是一个 JSON 对象，不要输出多余文字、Markdown 或解释。",
+  "target 优先使用“1号/2号”编号，编号以公开信息 JSON 的 players 数组顺序为准（players[0] = 1号）。",
+  "speech / wolf_chat 的 content 必须非空；若需要沉默，用 content=\"（沉默）\"。",
+  "vote / night_action 若弃权或不行动，则 target 必须为 null。",
   "保持字段完整，confidence 是 0-1 之间的小数。",
-  "示例：{\"type\":\"speech\",\"content\":\"我倾向...\",\"target\":null,\"confidence\":0.62,\"notes\":\"简短理由\"}",
+  "示例（发言）：{\"type\":\"speech\",\"content\":\"我倾向...\",\"target\":null,\"confidence\":0.62,\"notes\":\"简短理由\"}",
+  "示例（投票）：{\"type\":\"vote\",\"content\":\"\",\"target\":\"1号\",\"confidence\":0.55,\"notes\":\"跟随可信发言\"}",
+  "示例（夜晚）：{\"type\":\"night_action\",\"content\":\"\",\"target\":\"2号\",\"confidence\":0.58,\"notes\":\"优先高价值位\"}",
 ].join("\n");
 
 export const BASE_PLAYER_SYSTEM_PROMPT = `
