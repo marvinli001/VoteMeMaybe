@@ -1,0 +1,31 @@
+Original prompt: 帮我全面检查关于我这个votememaybe游戏，但是我也有个想优化的点，我看到别人的tarui app根本没有任何有像我这样网页封装的痕迹像是原生app是怎么做到了？
+
+- 2026-03-12: Started review. Inspecting React game flow, Tauri shell config, API proxy path, and native-window polish gaps.
+- 2026-03-12: Review findings so far:
+  - Tauri shell is still near-template defaults: 800x600 fixed window, default decorations, no custom titlebar/drag region, no transparent/effect settings, bundling disabled.
+  - Frontend still contains template metadata in index.html (lang, favicon, title), which reinforces non-product feel during browser/dev fallback.
+  - Menu shows configuration controls that are not wired to any state or rules yet (`角色包`, `显示提示`).
+  - Security posture is loose for a desktop app: API keys stored in plain Tauri store JSON; proxy command accepts arbitrary URL/headers/body; CSP is disabled.
+  - Verification blockers in current environment: `npm run build:fe` fails because optional Rollup binary `@rollup/rollup-darwin-arm64` is missing; Rust toolchain is not installed (`cargo`/`rustc` missing).
+- 2026-03-12: Implemented changes:
+  - Replaced template browser metadata and added app-specific favicon.
+  - Added a custom desktop-style titlebar with Tauri window controls, updated default window size to 1380x860, set min dimensions, centered the window, and disabled native decorations.
+  - Reworked the menu to remove fake setup controls and replaced them with real rule/security summaries.
+  - Changed API key persistence so keys are session-only and stripped before writing store data.
+  - Replaced the generic Rust `http_proxy` with a dedicated `ai_proxy` that only posts to supported AI endpoints and rejects insecure remote HTTP hosts; restored a restrictive CSP.
+  - Fixed pending human actions so returning to menu / starting a new game rejects the waiting promise instead of leaving it hanging.
+- 2026-03-12: Verification:
+  - `npm install` completed and restored the missing Rollup optional package.
+  - `npm run build:fe` passes.
+  - Browser verification via Playwright confirmed the new titlebar, menu summary cards, and AI config note are present; fresh browser session showed zero console errors after adding favicon assets.
+  - Remaining blocker: Rust toolchain is not installed in this environment, so `cargo check` / `tauri build` could not be run.
+- 2026-03-12: Third-pass desktop polish:
+  - Strengthened titlebar phase linkage by adding a central status block that reflects current day/phase plus live objective text (e.g. "轮到你提交狼刀与夜聊").
+  - Reworked the in-game right rail from a chat-like panel into a fixed sidebar: header, phase brief card, activity log, speech draft composer, and a bottom "战术抽屉" for private info / wolf chat.
+  - Removed the old floating private overlay behavior in favor of a fixed, collapsible bottom section inside the sidebar.
+- 2026-03-12: Third-pass verification:
+  - `npm run build:fe` passes after the layout/titlebar refactor.
+  - Playwright screenshots verified:
+    - menu view renders with the strengthened titlebar status card;
+    - game view renders with the new fixed sidebar;
+    - opening the tactical drawer keeps the main layout stable and uses internal scrolling instead of overlaying the scene.

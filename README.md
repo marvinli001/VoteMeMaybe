@@ -1,6 +1,6 @@
 # Vote Me Maybe
 
-Single-player, offline Werewolf (12-player) built with Tauri and React. One human player competes against AI agents with private context, phase-based rules, and structured JSON output.
+Single-player desktop Werewolf (12-player) built with Tauri and React. One human player competes against AI agents with private context, phase-based rules, and structured JSON output.
 
 ## Features
 - 12-player classic Werewolf rules with day/night phase loop
@@ -56,7 +56,8 @@ If you want installers (MSI/NSIS), set `bundle.active` to `true` in `src-tauri/t
 - `build:portable`: Tauri build with bundling disabled
 
 ## Configuration
-AI providers and models are managed in the AI configuration screen. The configuration is stored locally using the Tauri store plugin.
+AI providers and models are managed in the AI configuration screen. Provider names, hosts, and model assignments are stored locally using the Tauri store plugin.
+API keys are session-only and are not written to disk.
 
 ## Notes
 The game UI only renders public speech content. All AI outputs must be JSON as defined in the in-app system prompt.

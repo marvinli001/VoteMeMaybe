@@ -492,11 +492,11 @@ export const requestAgentOutput = async (
   try {
     if (isTauri()) {
       const attempt = async (requestBody: unknown) => {
-        const response = await invoke<ProxyResponse>("http_proxy", {
+        const response = await invoke<ProxyResponse>("ai_proxy", {
           request: {
-            url,
-            method: "POST",
-            headers,
+            baseUrl: profile.baseUrl,
+            protocol: profile.protocol,
+            apiKey: profile.apiKey,
             body: JSON.stringify(requestBody),
           },
         });

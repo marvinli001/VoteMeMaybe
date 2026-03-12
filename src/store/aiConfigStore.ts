@@ -21,6 +21,12 @@ export type AiConfigState = {
   aiPlayers: AiPlayerConfig[];
 };
 
+const stripProviderSecrets = (providers: ApiProvider[]): ApiProvider[] =>
+  providers.map((provider) => ({
+    ...provider,
+    apiKey: "",
+  }));
+
 const normalizeProviders = (
   raw: unknown,
   fallback: ApiProvider[],
@@ -50,7 +56,8 @@ const normalizeProviders = (
         name: candidate.name.trim() || "未命名提供商",
         protocol,
         baseUrl: candidate.baseUrl.trim(),
-        apiKey: typeof candidate.apiKey === "string" ? candidate.apiKey.trim() : "",
+        // API keys stay in memory only and are never restored from disk.
+        apiKey: "",
       });
     }
   }
@@ -135,6 +142,9 @@ export const loadAiConfig = async (
 
 export const saveAiConfig = async (config: AiConfigState) => {
   const store = await getStore();
-  await store.set(CONFIG_KEY, config);
+  await store.set(CONFIG_KEY, {
+    providers: stripProviderSecrets(config.providers),
+    aiPlayers: config.aiPlayers,
+  } satisfies AiConfigState);
   await store.save();
 };

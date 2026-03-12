@@ -1,5 +1,7 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+﻿import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import "./App.css";
 import type {
   ApiProvider,
@@ -62,6 +64,10 @@ type NightResult = {
 type HunterResult = { targetId: string | null };
 
 type EngineToken = { aborted: boolean };
+type PendingRequest = {
+  resolve: (value: unknown) => void;
+  reject: (reason?: unknown) => void;
+};
 
 type PhaseMeta = {
   name: string;
@@ -412,6 +418,10 @@ const parseWitchAction = (output: { content: string; notes: string } | null) => 
 };
 
 function App() {
+  const tauriWindow = useMemo(
+    () => (isTauri() ? getCurrentWindow() : null),
+    [],
+  );
   const [view, setView] = useState<"menu" | "ai-config" | "game">("menu");
   const [aiConfig, setAiConfig] = useState<AiConfigState>(defaultAiConfig);
   const [session, setSession] = useState<GameSession | null>(null);
@@ -432,10 +442,11 @@ function App() {
   const [voteSummary, setVoteSummary] = useState<string[]>([]);
   const [voteSummaryOpen, setVoteSummaryOpen] = useState(false);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
 
   const sessionRef = useRef<GameSession | null>(null);
   const pausedRef = useRef(false);
-  const pendingResolverRef = useRef<((value: unknown) => void) | null>(null);
+  const pendingRequestRef = useRef<PendingRequest | null>(null);
   const engineRef = useRef<EngineToken | null>(null);
   const agentErrorRef = useRef<Record<string, string>>({});
   const chatBodyRef = useRef<HTMLDivElement | null>(null);
@@ -455,6 +466,46 @@ function App() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!tauriWindow) {
+      return;
+    }
+    let active = true;
+    let unlisten: (() => void) | null = null;
+
+    const syncWindowState = async () => {
+      try {
+        const maximized = await tauriWindow.isMaximized();
+        if (active) {
+          setIsWindowMaximized(maximized);
+        }
+      } catch {
+        if (active) {
+          setIsWindowMaximized(false);
+        }
+      }
+    };
+
+    void syncWindowState();
+    tauriWindow
+      .onResized(() => {
+        void syncWindowState();
+      })
+      .then((dispose) => {
+        unlisten = dispose;
+      })
+      .catch(() => {
+        unlisten = null;
+      });
+
+    return () => {
+      active = false;
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, [tauriWindow]);
 
   useEffect(() => {
     if (!pendingAction) {
@@ -516,6 +567,40 @@ function App() {
       .filter((player) => player.id !== humanId)
       .map((player) => player.name);
   }, [session, humanRole]);
+  const aliveCount = session ? getAlivePlayers(session.players).length : roster.length;
+  const eliminatedCount = roster.length - aliveCount;
+  const currentObjective =
+    gameResult ??
+    (paused
+      ? "对局暂停中"
+      : pendingAction?.type === "speech"
+        ? "轮到你公开发言"
+        : pendingAction?.type === "vote"
+          ? "轮到你完成投票"
+          : pendingAction?.type === "hunter"
+            ? "轮到你决定是否开枪"
+            : pendingAction?.type === "night"
+              ? pendingAction.role === "werewolf"
+                ? "轮到你提交狼刀与夜聊"
+                : pendingAction.role === "seer"
+                  ? "轮到你选择查验对象"
+                  : pendingAction.role === "witch"
+                    ? "轮到你决定是否用药"
+                    : "夜间行动处理中"
+              : phaseInfo.hint);
+  const titlebarPhaseChip = gameResult
+    ? "对局结束"
+    : view === "game"
+      ? phaseInfo.name
+      : view === "ai-config"
+        ? "AI 控制台"
+        : "准备开局";
+  const titlebarSummary =
+    view === "game"
+      ? `${aliveCount} 在场 · ${currentObjective}`
+      : view === "ai-config"
+        ? "配置 Provider、Host 与模型映射"
+        : "12 人桌面局";
 
   const isChatNearBottom = (element: HTMLElement) =>
     element.scrollHeight - element.scrollTop - element.clientHeight <= 48;
@@ -570,6 +655,56 @@ function App() {
     (pendingAction?.type === "night" || pendingAction?.type === "hunter") &&
     !paused &&
     view === "game";
+  const titlebarDetail =
+    view === "game"
+      ? `第 ${session?.day ?? 1} 日 · ${phaseInfo.name}`
+      : view === "ai-config"
+        ? "AI 控制台"
+        : "单机桌游局";
+
+  const handleWindowMinimize = async () => {
+    if (!tauriWindow) {
+      return;
+    }
+    try {
+      await tauriWindow.minimize();
+    } catch {
+      // Ignore window API failures in browser preview.
+    }
+  };
+
+  const handleWindowToggleMaximize = async () => {
+    if (!tauriWindow) {
+      return;
+    }
+    try {
+      await tauriWindow.toggleMaximize();
+      setIsWindowMaximized(await tauriWindow.isMaximized());
+    } catch {
+      // Ignore window API failures in browser preview.
+    }
+  };
+
+  const handleWindowClose = async () => {
+    if (!tauriWindow) {
+      return;
+    }
+    try {
+      await tauriWindow.close();
+    } catch {
+      // Ignore window API failures in browser preview.
+    }
+  };
+
+  const handleTitlebarDoubleClick = (event: ReactMouseEvent<HTMLElement>) => {
+    if (!tauriWindow) {
+      return;
+    }
+    if (event.target instanceof HTMLElement && event.target.closest("button")) {
+      return;
+    }
+    void handleWindowToggleMaximize();
+  };
 
   const updateProvider = (id: string, patch: Partial<ApiProvider>) => {
     setAiConfig((prev) => ({
@@ -639,9 +774,17 @@ function App() {
     engineRef.current = null;
   };
 
+  const cancelPendingAction = (reason = "pending-action-cancelled") => {
+    if (pendingRequestRef.current) {
+      pendingRequestRef.current.reject(new Error(reason));
+    }
+    pendingRequestRef.current = null;
+    setPendingAction(null);
+  };
+
   const handleReturnMenu = () => {
     stopEngine();
-    pendingResolverRef.current = null;
+    cancelPendingAction("return-to-menu");
     setPaused(false);
     setSession(null);
     sessionRef.current = null;
@@ -659,6 +802,14 @@ function App() {
     setWolfChatDraft("");
     setView("menu");
   };
+
+  useEffect(
+    () => () => {
+      stopEngine();
+      cancelPendingAction("app-unmount");
+    },
+    [],
+  );
 
   const mutateSession = (mutator: (draft: GameSession) => void) => {
     const current = sessionRef.current;
@@ -784,16 +935,24 @@ function App() {
   };
 
   const requestHumanAction = <T,>(action: PendingAction) =>
-    new Promise<T>((resolve) => {
-      pendingResolverRef.current = resolve as (value: unknown) => void;
+    new Promise<T>((resolve, reject) => {
+      if (pendingRequestRef.current) {
+        pendingRequestRef.current.reject(
+          new Error("pending-action-replaced"),
+        );
+      }
+      pendingRequestRef.current = {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+      };
       setPendingAction(action);
     });
 
   const resolvePendingAction = (payload: unknown) => {
-    if (pendingResolverRef.current) {
-      pendingResolverRef.current(payload);
+    if (pendingRequestRef.current) {
+      pendingRequestRef.current.resolve(payload);
     }
-    pendingResolverRef.current = null;
+    pendingRequestRef.current = null;
     setPendingAction(null);
   };
 
@@ -888,7 +1047,7 @@ function App() {
 
   const handleStartGame = () => {
     stopEngine();
-    pendingResolverRef.current = null;
+    cancelPendingAction("start-new-game");
     agentErrorRef.current = {};
     const players: PlayerPublicState[] = roster.map((player) => ({
       id: player.id,
@@ -1528,12 +1687,77 @@ function App() {
   );
 
   return (
-    <div className="app">
-      {view === "menu" ? (
-        <div className="menu">
+    <div className="shell">
+      <header
+        className="shell__titlebar"
+        data-tauri-drag-region
+        onDoubleClick={handleTitlebarDoubleClick}
+      >
+        <div className="shell__brand" data-tauri-drag-region>
+          <span className="shell__mark" data-tauri-drag-region>
+            V
+          </span>
+          <div className="shell__copy" data-tauri-drag-region>
+            <strong data-tauri-drag-region>Vote Me Maybe</strong>
+            <span data-tauri-drag-region>{titlebarDetail}</span>
+          </div>
+        </div>
+        <div className="shell__status" data-tauri-drag-region>
+          <span className="shell__status-chip" data-tauri-drag-region>
+            {titlebarPhaseChip}
+          </span>
+          <div className="shell__status-copy" data-tauri-drag-region>
+            <strong data-tauri-drag-region>{titlebarDetail}</strong>
+            <span data-tauri-drag-region>{titlebarSummary}</span>
+          </div>
+        </div>
+        <div className="shell__meta" data-tauri-drag-region>
+          <span className="shell__meta-badge" data-tauri-drag-region>
+            {tauriWindow ? "Tauri 桌面版" : "浏览器预览"}
+          </span>
+        </div>
+        <div className="shell__window-controls">
+          <button
+            type="button"
+            className="window-control"
+            disabled={!tauriWindow}
+            onClick={() => {
+              void handleWindowMinimize();
+            }}
+            aria-label="最小化窗口"
+          >
+            -
+          </button>
+          <button
+            type="button"
+            className="window-control"
+            disabled={!tauriWindow}
+            onClick={() => {
+              void handleWindowToggleMaximize();
+            }}
+            aria-label={isWindowMaximized ? "还原窗口" : "最大化窗口"}
+          >
+            {isWindowMaximized ? "❐" : "□"}
+          </button>
+          <button
+            type="button"
+            className="window-control window-control--close"
+            disabled={!tauriWindow}
+            onClick={() => {
+              void handleWindowClose();
+            }}
+            aria-label="关闭窗口"
+          >
+            ×
+          </button>
+        </div>
+      </header>
+      <div className="app">
+        {view === "menu" ? (
+          <div className="menu">
           <header className="menu__header">
             <div>
-              <span className="menu__badge">离线桌游 · 单人推理</span>
+              <span className="menu__badge">桌面桌游 · 单人推理</span>
               <h1 className="menu__title">Vote Me Maybe</h1>
               <p className="menu__subtitle">
                 你是唯一的人类玩家，其余席位由 AI 代理接管。对局过程中
@@ -1547,7 +1771,7 @@ function App() {
               </div>
               <div className="menu__status-item">
                 <span className="menu__status-label">模式</span>
-                <strong>单机 / 离线</strong>
+                <strong>单机 / API 驱动</strong>
               </div>
             </div>
           </header>
@@ -1581,26 +1805,28 @@ function App() {
                 </div>
 
                 <div className="panel panel--compact">
-                  <div className="panel__title">开局配置</div>
+                  <div className="panel__title">本局设定</div>
                   <div className="setup-grid">
-                    <label>
-                      角色包
-                      <select defaultValue="classic">
-                        <option value="classic">经典 12 人</option>
-                        <option value="guard">含守卫</option>
-                        <option value="seer">多神职</option>
-                      </select>
-                    </label>
-                    <label>
-                      显示提示
-                      <select defaultValue="soft">
-                        <option value="soft">温和引导</option>
-                        <option value="hard">仅阶段提示</option>
-                      </select>
-                    </label>
+                    <div className="setup-card">
+                      <span className="setup-card__label">身份配置</span>
+                      <strong>4 狼 / 预 / 女 / 猎 / 白 / 4 民</strong>
+                    </div>
+                    <div className="setup-card">
+                      <span className="setup-card__label">流程</span>
+                      <strong>夜晚结算 → 发言 → 投票 → 放逐</strong>
+                    </div>
+                    <div className="setup-card">
+                      <span className="setup-card__label">信息呈现</span>
+                      <strong>只公开最终发言，不展示推理链</strong>
+                    </div>
+                    <div className="setup-card">
+                      <span className="setup-card__label">密钥策略</span>
+                      <strong>API Key 仅当前会话可用，不会写入磁盘</strong>
+                    </div>
                   </div>
                   <div className="setup-note">
-                    发言与投票均为单次锁定，非法操作会提前禁用。
+                    发言与投票均为单次锁定。模型、Host 与座位映射可保存，API
+                    Key 需要每次启动后重新输入。
                   </div>
                 </div>
               </div>
@@ -1626,7 +1852,7 @@ function App() {
               <button className="button button--ghost" onClick={handleSaveAiConfig}
               >
                 {saveState === "saved"
-                  ? "已保存"
+                  ? "已保存（不含 Key）"
                   : saveState === "error"
                     ? "保存失败"
                     : "保存配置"}
@@ -1643,7 +1869,8 @@ function App() {
               <div className="panel panel--providers">
                 <div className="panel__title">API 提供商</div>
                 <p className="panel__hint">
-                  添加 API 协议、Key 与 Host，可用于多个 AI 玩家复用。
+                  添加 API 协议、Key 与 Host，可用于多个 AI 玩家复用。为安全起见，
+                  API Key 仅保存在当前会话中，点击保存不会写入磁盘。
                 </p>
                 <div className="provider-list">
                   {aiConfig.providers.map((provider) => (
@@ -2085,16 +2312,43 @@ function App() {
           <aside className="chat-panel">
             <header className="chat-header">
               <div>
-                <span className="chat-title">公共讨论</span>
+                <span className="chat-title">局内记录</span>
                 <p className="chat-subtitle">
-                  发言将同步到所有玩家，注意字数限制。
+                  固定侧栏集中展示阶段摘要、公共播报、发言草稿与私密情报。
                 </p>
               </div>
               <div className="chat-phase">
-                <span>阶段</span>
+                <span>第 {session?.day ?? 1} 日</span>
                 <strong>{phaseInfo.name}</strong>
               </div>
             </header>
+
+            <section className="sidebar-brief">
+              <div className="sidebar-brief__top">
+                <span className="sidebar-brief__chip">{titlebarPhaseChip}</span>
+                {humanRole && (
+                  <span className="sidebar-brief__role">{humanRoleLabel}</span>
+                )}
+              </div>
+              <strong className="sidebar-brief__headline">{currentObjective}</strong>
+              <div className="sidebar-metrics">
+                <div className="sidebar-metric">
+                  <span>在场</span>
+                  <strong>{aliveCount}</strong>
+                </div>
+                <div className="sidebar-metric">
+                  <span>出局</span>
+                  <strong>{eliminatedCount}</strong>
+                </div>
+                <div className="sidebar-metric">
+                  <span>你的状态</span>
+                  <strong>
+                    {session?.players.find((player) => player.id === humanId)?.status ??
+                      "未开局"}
+                  </strong>
+                </div>
+              </div>
+            </section>
 
             <div className="chat-body" ref={chatBodyRef}>
               {publicLog.map((message) => (
@@ -2160,19 +2414,17 @@ function App() {
 
             <div className="chat-input">
               <label>
-                你的发言
+                发言草稿
                 <textarea
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   maxLength={240}
-                  placeholder="请输入你的推理与立场（仅一次发言）"
+                  placeholder="记录你的判断与站位，轮到你时提交。"
                   disabled={!canSpeak}
                 />
               </label>
               <div className="chat-input__meta">
-                <span className="chat-count">
-                  {draft.length}/240
-                </span>
+                <span className="chat-count">{draft.length}/240</span>
                 <button
                   className="button button--primary"
                   disabled={!canSpeak || draft.trim().length === 0}
@@ -2195,7 +2447,7 @@ function App() {
                 className="private-toggle"
                 onClick={() => setPrivateOpen((open) => !open)}
               >
-                {privateOpen ? "收起私密" : "展开私密"}
+                {privateOpen ? "收起战术抽屉" : "展开战术抽屉"}
               </button>
               <div className="private-content">
                 {session && (
@@ -2328,6 +2580,7 @@ function App() {
             )}
           </div>
         )}
+      </div>
     </div>
   );
 }
